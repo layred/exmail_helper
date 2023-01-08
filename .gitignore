@@ -1,0 +1,5 @@
+.vscode
+venv
+.env
+.flake8
+.DS_Store
