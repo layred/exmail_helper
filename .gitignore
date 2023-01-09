@@ -3,3 +3,4 @@ venv
 .env
 .flake8
 .DS_Store
+__pycache__
