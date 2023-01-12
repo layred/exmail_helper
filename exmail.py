@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import random
+import time
 from colorama import Fore, init
 import requests
 import openpyxl
@@ -8,6 +9,8 @@ import js2py
 import os
 from dotenv import dotenv_values
 import cups
+import pytesseract
+import cv2
 
 
 init()
@@ -134,7 +137,7 @@ def get_shipment_russian(shipment_id):
     return requests.get(f"https://sa.exmail24.ru/api/shipments/get-id/{shipment_id}")
 
 
-def sort_accept(freight_id):
+def sort_accept(login_data, freight_id):
     wb = openpyxl.load_workbook(F'{BASE_DIR}/input/accept.xlsx')
     sheet = wb.active
     shipments_to_add = []
@@ -145,14 +148,24 @@ def sort_accept(freight_id):
                 "ceil_id": parse_code(str(round(sheet.cell(row=row+1, column=1).value))),
                 "shipment_id": parse_code(str(round(sheet.cell(row=row, column=1).value)))
             })
-    session = login()
+    session = login(login_data)
     for shipment_data in shipments_to_add:
         place_shipment(session, shipment_data['shipment_id'], {"ceil_id": shipment_data['ceil_id'], "freight_id": freight_id})
-        shipment_json = get_shipment(session, shipment_data['shipment_id']).json()
-        if shipment_json['point_dst']['id'] != 275:
+        shipment = get_shipment(session, shipment_data['shipment_id'])
+        shipment_json = shipment.json()
+        while shipment.status_code == 429:
+            print(Fore.LIGHTRED_EX + "[WARNING] Много запросов статус: {}".format(shipment.status_code))
+            time.sleep(5)
+            shipment = get_shipment(session, shipment_data['shipment_id'])
+            shipment_json = shipment.json()
+            if shipment.status_code != 429:
+                break
+        if shipment_json.get('point_dst', {}).get('id', False) != 275:
             sents.append(shipment_data)
             print(Fore.LIGHTRED_EX + f"Засыл {shipment_json['number']}({shipment_json['id']}) - полка {shipment_json['ceil']['name']}")
         else:
+            shipment = get_shipment(session, shipment_data['shipment_id'])
+            shipment_json = shipment.json()
             if shipment_json['status'] == "150":
                 place_shipment(session, shipment_data['shipment_id'], {"ceil_id": shipment_data['ceil_id'], "freight_id": freight_id})
                 shipment_json = get_shipment(session, shipment_data['shipment_id']).json()
@@ -207,6 +220,53 @@ def print_invoice_file():
     # os.remove(f"{BASE_DIR}/temp/invoice.xlsx")
 
 
+def check_shipments(shipments):
+    if config.get("EXMAIL_PASSWORD", False) is False or config.get("EXMAIL_PASSWORD", False) == '' or config.get("EXMAIL_LOGIN", False) is False or config.get("EXMAIL_LOGIN", False) == '':
+        print(Fore.RED + "[ERROR] Не указанны переменный в файле .env, укажите логин(почту) и пароль от exmail")
+        exit()
+    login_data = {"password": config['EXMAIL_PASSWORD'], "email_adress": config['EXMAIL_LOGIN'], "remember": True}
+    session = login(login_data)
+    for i, shipment_code in enumerate(shipments):
+        if len(str(shipment_code)) == 13:
+            shipment_code = parse_code(str(shipment_code))
+        shipment = get_shipment(session=session, shipment_id=shipment_code)
+        while shipment.status_code == 429:
+            time.sleep(2)
+            shipment = get_shipment(session=session, shipment_id=shipment_code)
+        try:
+            if int(shipment.json().get("status")) == 90:
+                print(Fore.LIGHTGREEN_EX + "[SUCCESS] #{}. {}({}) статуc {}, пвз {}".format(i+1, shipment.json().get("number", ""), shipment.json().get("id", ""), SHIPMENT_STATUS_VALUES[int(shipment.json().get("status"))], shipment.json().get("dts_point_id", "")))
+            elif int(shipment.json().get("status")) == 100:
+                print(Fore.LIGHTBLUE_EX + "[SUCCESS] #{}. {}({}) статуc {}, пвз {}".format(i+1, shipment.json().get("number", ""), shipment.json().get("id", ""), SHIPMENT_STATUS_VALUES[int(shipment.json().get("status"))], shipment.json().get("dts_point_id", "")))
+            else:
+                print(Fore.RED + "[WARNING] #{}. {}({}) статуc {}, пвз {}".format(i+1, shipment.json().get("number", ""), shipment.json().get("id", ""), SHIPMENT_STATUS_VALUES[int(shipment.json().get("status"))], shipment.json().get("dts_point_id", "")))
+        except TypeError:
+            print(Fore.RED + "[ERROR] #{}. {}".format(i+1, shipment_code))
+
+
+def decode_shipment_code(shipment_id):
+    try:
+        shipment_id = str(shipment_id).strip().replace("\n", '').replace("-", '')
+        if len(str(shipment_id)) == 13:
+            return parse_code(str(shipment_id))
+        shipment_response = get_shipment_russian(shipment_id)
+        if shipment_response.json() == {}:
+            return "Ошибка {}".format(shipment_id)
+        return int(shipment_response.text)
+    except Exception:
+        return "Ошибка {}".format(shipment_id)
+
+
+def decode_shipments_from_photo(path):
+    image = cv2.imread(path)
+    string = pytesseract.image_to_string(image,  config='digits')
+    shipments = []
+    for shipment in string.split("\n"):
+        if len(str(shipment)) != 0:
+            shipments.append(decode_shipment_code(shipment))
+    return shipments
+
+
 def main():
     try:
         if config.get("EXMAIL_PASSWORD", False) is False or config.get("EXMAIL_PASSWORD", False) == '' or config.get("EXMAIL_LOGIN", False) is False or config.get("EXMAIL_LOGIN", False) == '':
@@ -243,7 +303,7 @@ def main():
                             if response.status_code == 404:
                                 raise ValueError
                             print(Fore.LIGHTBLUE_EX + "[INFO] Размещаю посылки по полочкам")
-                            sort_accept(freight_id)
+                            sort_accept(login_data, freight_id)
                             print(Fore.GREEN + "[SUCCESS] Обработка завершена")
                             break
                         except ValueError:
@@ -360,17 +420,6 @@ def main():
 
 
 if __name__ == '__main__':
+    # shipments = decode_shipments_from_photo(f'{BASE_DIR}/input/freight_photo.jpg')
+    # check_shipments(shipments)
     main()
-
-    # conn = cups.Connection()
-    # printers = conn.getPrinters()
-    # emptyDict = {
-    #     "PrintSpeed": "60",
-    #     "PageSize": "w295h417",
-    #     "Darkness": "5",
-    #     "Vertical": "5"
-    # }
-    # AvailablePrinters = list(printers.keys())
-    # PrinterUsing = AvailablePrinters[0]
-    # conn.printFile(PrinterUsing, f"{BASE_DIR}/sticker.pdf", "Custom.100x70", emptyDict)
-    # os.remove(f"{BASE_DIR}/temp/sticker.pdf")
