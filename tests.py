@@ -44,13 +44,46 @@ def get_shipment(session: requests.Session, shipment_id):
     return session.get(f"https://pvz.exmail24.ru/api/shipments/{shipment_id}", headers=build_headers(session), cookies=session.cookies)
 
 
-def test_put(session: requests.Session, id):
-    return session.put(f"https://pvz.exmail24.ru/api/freights/{id}/finished", headers=build_headers(session), cookies=session.cookies)
+def change_sending_status(session: requests.Session, id, status):
+    return session.put(f"https://pvz.exmail24.ru/api/sendings/{id}", headers=build_headers(session), cookies=session.cookies, data=json.dumps({"status": f"{status}"}))
+
+
+def change_shipment_status(session: requests.Session, id, status):
+    return session.put(f"https://pvz.exmail24.ru/api/shipments/{id}", headers=build_headers(session), cookies=session.cookies, data=json.dumps({"status": f"{status}"}))
+
+
+def change_shipment_comment(session: requests.Session, id, comment):
+    return session.put(f"https://pvz.exmail24.ru/api/shipments/{id}", headers=build_headers(session), cookies=session.cookies, data=json.dumps({"comment": f"{comment}"}))
+
+
+def change_shipment_history(session: requests.Session, id):
+    return session.get(f"https://pvz.exmail24.ru/api/shipments/{id}/history", headers=build_headers(session), cookies=session.cookies)
+
+
+def change_user_role(session: requests.Session):
+    return session.get("https://pvz.exmail24.ru/api/clients", headers=build_headers(session), cookies=session.cookies)
+
+
+def delete_shipment(session: requests.Session, id):
+    return session.delete(f"https://pvz.exmail24.ru/api/shipments/{id}", headers=build_headers(session), cookies=session.cookies)
+
+
+def change_freight_status(session: requests.Session, id):
+    return session.put(f"https://pvz.exmail24.ru/api/freights/{id}", headers=build_headers(session), cookies=session.cookies, data=json.dumps({"number_of_shipments": 12}))
+
+
+def change_point_data(session: requests.Session):
+    return session.put("https://pvz.exmail24.ru/api/points/275", headers=build_headers(session), cookies=session.cookies)
 
 
 def main(login_data):
     session = login(login_data)
-    response = test_put(session, 57664)
+    # response = change_shipment_comment(session, 200201, "Передано в транзит СЦ Домодедовский - Евпатория --")
+    # response = change_user_role(session)
+    # response = delete_shipment(session, 200201)
+    # response = change_freight_status(session, 85168)
+    # response = change_sending_status(session, 76766, 100)
+    response = change_point_data(session)
     print(response.status_code, response.json())
 
 

@@ -149,12 +149,12 @@ def sort_accept(login_data, freight_id):
                 "shipment_id": parse_code(str(round(sheet.cell(row=row, column=1).value)))
             })
     session = login(login_data)
-    for shipment_data in shipments_to_add:
+    for i, shipment_data in enumerate(shipments_to_add):
         place_shipment(session, shipment_data['shipment_id'], {"ceil_id": shipment_data['ceil_id'], "freight_id": freight_id})
         shipment = get_shipment(session, shipment_data['shipment_id'])
         shipment_json = shipment.json()
         while shipment.status_code == 429:
-            print(Fore.LIGHTRED_EX + "[WARNING] Много запросов статус: {}".format(shipment.status_code))
+            # print(Fore.LIGHTRED_EX + "[WARNING] Много запросов статус: {}".format(shipment.status_code))
             time.sleep(5)
             shipment = get_shipment(session, shipment_data['shipment_id'])
             shipment_json = shipment.json()
@@ -162,16 +162,16 @@ def sort_accept(login_data, freight_id):
                 break
         if shipment_json.get('point_dst', {}).get('id', False) != 275:
             sents.append(shipment_data)
-            print(Fore.LIGHTRED_EX + f"Засыл {shipment_json['number']}({shipment_json['id']}) - полка {shipment_json['ceil']['name']}")
+            print(Fore.LIGHTRED_EX + f"#{i+1} Засыл {shipment_json['number']}({shipment_json['id']}) - полка {shipment_json['ceil']['name']}")
         else:
             shipment = get_shipment(session, shipment_data['shipment_id'])
             shipment_json = shipment.json()
-            if shipment_json['status'] == "150":
+            if shipment_json.get('status', '') == "150":
                 place_shipment(session, shipment_data['shipment_id'], {"ceil_id": shipment_data['ceil_id'], "freight_id": freight_id})
                 shipment_json = get_shipment(session, shipment_data['shipment_id']).json()
-                print(Fore.LIGHTCYAN_EX + f"{shipment_json['number']}({shipment_json['id']}) {shipment_json['ceil']['name']} успешно размещена X2")
+                print(Fore.LIGHTCYAN_EX + f"#{i+1} {shipment_json['number']}({shipment_json['id']}) {shipment_json['ceil']['name']} успешно размещена X2")
             else:
-                print(Fore.LIGHTCYAN_EX + f"{shipment_json['number']}({shipment_json['id']}) {shipment_json['ceil']['name']} успешно размещена")
+                print(Fore.LIGHTCYAN_EX + f"#{i+1} [{shipment.status_code}] {shipment_json.get('number', '')}({shipment_json.get('id', '')}) {shipment_json.get('ceil', {}).get('name', 'Ошибка')} успешно размещена")
 
 
 def sort_send(session, send_id):
@@ -394,6 +394,8 @@ def main():
                             if str(shipment_id).lower() == 'назад':
                                 break
                             shipment_id = int(shipment_id)
+                            if len(str(shipment_id)) == 13:
+                                shipment_id = parse_code(str(shipment_id))
                             shipment_response = get_shipment(session, shipment_id)
                             if shipment_response.status_code == 404:
                                 shipment_response = get_shipment_russian(shipment_id)
@@ -420,6 +422,6 @@ def main():
 
 
 if __name__ == '__main__':
+    main()
     # shipments = decode_shipments_from_photo(f'{BASE_DIR}/input/freight_photo.jpg')
     # check_shipments(shipments)
-    main()
